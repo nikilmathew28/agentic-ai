@@ -1,10 +1,265 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>🤖 AI Learning Mentor - PDF Upload</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+const express = require('express');
+const cors = require('cors');
+const multer = require('multer');
+const pdfParse = require('pdf-parse');
+const fs = require('fs');
+const path = require('path');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Configure multer for file uploads
+const upload = multer({ dest: 'uploads/' });
+
+// Store users and their PDF knowledge
+const users = new Map();
+const pdfKnowledge = new Map();
+
+// Test route
+app.get('/', (req, res) => {
+    res.json({ message: '🚀 AI Learning Mentor is running!' });
+});
+
+// Upload PDF endpoint
+app.post('/api/upload-pdf', upload.single('pdf'), async (req, res) => {
+    try {
+        const { userId } = req.body;
+        const pdfFile = req.file;
+        
+        if (!pdfFile) {
+            return res.status(400).json({ error: 'No PDF file uploaded' });
         }
+        
+        // Read the PDF file
+        const dataBuffer = fs.readFileSync(pdfFile.path);
+        
+        // Parse PDF
+        const pdfData = await pdfParse(dataBuffer);
+        const pdfText = pdfData.text;
+        
+        // Extract topics and concepts using AI (simulated for now)
+        const knowledge = await extractKnowledgeFromText(pdfText);
+        
+        // Store knowledge for user
+        pdfKnowledge.set(userId, knowledge);
+        
+        // Clean up uploaded file
+        fs.unlinkSync(pdfFile.path);
+        
+        res.json({
+            success: true,
+            message: 'PDF uploaded and analyzed successfully!',
+            knowledge: {
+                topics: knowledge.topics,
+                questionCount: knowledge.questions.length,
+                subject: knowledge.subject
+            }
+        });
+        
+    } catch (error) {
+        console.error('PDF upload error:', error);
+        res.status(500).json({ error: 'Failed to process PDF' });
+    }
+});
+
+// Helper function to extract knowledge from text
+async function extractKnowledgeFromText(text) {
+    // For hackathon demo, we'll simulate AI extraction
+    // In real app, you'd use OpenAI or Gemini API
+    
+    const lines = text.split('\n').filter(line => line.trim().length > 0);
+    
+    // Detect subject based on keywords
+    let subject = 'General';
+    if (text.toLowerCase().includes('python') || text.toLowerCase().includes('print(')) {
+        subject = 'Python Programming';
+    } else if (text.toLowerCase().includes('tamil') || text.toLowerCase().includes('வணக்கம்')) {
+        subject = 'Tamil Language';
+    } else if (text.toLowerCase().includes('javascript') || text.toLowerCase().includes('console.log')) {
+        subject = 'JavaScript';
+    } else if (text.toLowerCase().includes('html') || text.toLowerCase().includes('<body>')) {
+        subject = 'HTML/CSS';
+    }
+    
+    // Extract topics (simplified)
+    const topics = [];
+    const questions = [];
+    
+    // Look for chapter or section headings
+    lines.forEach((line, index) => {
+        if (line.match(/^(chapter|lesson|section|unit)\s+\d+/i)) {
+            topics.push(line.trim());
+        }
+        
+        // Create simple questions from content (for demo)
+        if (line.includes('print') && !questions.some(q => q.text.includes('print'))) {
+            questions.push({
+                id: questions.length + 1,
+                text: `📖 From your PDF: What is the correct way to print in ${subject}?`,
+                options: [
+                    'print("Hello")',
+                    'console.log("Hello")',
+                    'echo "Hello"',
+                    'printf("Hello")'
+                ],
+                correct: subject === 'Python Programming' ? 'print("Hello")' : 
+                        subject === 'JavaScript' ? 'console.log("Hello")' : 'print("Hello")',
+                explanation: `Based on your PDF: ${line.substring(0, 100)}...`
+            });
+        }
+    });
+    
+    // If no questions found, create default ones
+    if (questions.length === 0) {
+        questions.push({
+            id: 1,
+            text: `📚 From your uploaded PDF: What is the main topic of your document?`,
+            options: [
+                topics[0] || 'Python Programming',
+                topics[1] || 'JavaScript',
+                topics[2] || 'HTML/CSS',
+                'None of these'
+            ],
+            correct: topics[0] || 'Python Programming',
+            explanation: 'Based on the content you uploaded, this appears to be the main topic.'
+        });
+    }
+    
+    return {
+        subject,
+        topics: topics.length > 0 ? topics : ['Getting Started', 'Basic Concepts', 'Examples'],
+        questions: questions,
+        summary: `Found ${topics.length} topics and created ${questions.length} practice questions.`
+    };
+}
+
+// Get questions based on PDF
+app.post('/api/get-question', (req, res) => {
+    const { userId } = req.body;
+    
+    const knowledge = pdfKnowledge.get(userId);
+    
+    if (!knowledge || !knowledge.questions || knowledge.questions.length === 0) {
+        // Return default questions if no PDF uploaded
+        return res.json(getDefaultQuestion());
+    }
+    
+    // Get a random question from PDF knowledge
+    const questions = knowledge.questions;
+    const randomIndex = Math.floor(Math.random() * questions.length);
+    const question = questions[randomIndex];
+    
+    res.json(question);
+});
+
+// Get default questions (fallback)
+function getDefaultQuestion() {
+    const defaultQuestions = [
+        {
+            id: 1,
+            text: '🐍 Python: How do you print "Hello World"?',
+            options: ['print("Hello World")', 'console.log("Hello World")', 'echo "Hello World"', 'printf("Hello World")'],
+            correct: 'print("Hello World")',
+            explanation: 'In Python, we use the print() function!'
+        },
+        {
+            id: 2,
+            text: '🇮🇳 Tamil: How do you say "Hello" in Tamil?',
+            options: ['வணக்கம் (Vanakkam)', 'நமஸ்தே (Namaste)', 'ஹலோ (Hello)', 'குட் மார்னிங் (Good Morning)'],
+            correct: 'வணக்கம் (Vanakkam)',
+            explanation: 'வணக்கம் (Vanakkam) is the traditional Tamil greeting!'
+        },
+        {
+            id: 3,
+            text: '📜 JavaScript: How to create a variable?',
+            options: ['let x = 5', 'x = 5', 'var x = 5', 'All of these'],
+            correct: 'All of these',
+            explanation: 'JavaScript has multiple ways to declare variables!'
+        }
+    ];
+    
+    return defaultQuestions[Math.floor(Math.random() * defaultQuestions.length)];
+}
+
+// Submit answer
+app.post('/api/submit-answer', (req, res) => {
+    const { userId, answer, correctAnswer, questionId } = req.body;
+    
+    // Get or create user
+    if (!users.has(userId)) {
+        users.set(userId, {
+            level: 1,
+            xp: 0,
+            companion: '🥚',
+            streak: 0,
+            achievements: []
+        });
+    }
+    
+    const user = users.get(userId);
+    const isCorrect = answer === correctAnswer;
+    
+    if (isCorrect) {
+        user.xp += 10;
+        user.streak += 1;
+        
+        // Level up every 50 XP
+        if (user.xp >= user.level * 50) {
+            user.level++;
+            
+            // Evolve companion
+            if (user.level >= 5) user.companion = '🐉';
+            else if (user.level >= 3) user.companion = '🐣';
+        }
+        
+        // Check for achievements
+        if (user.streak === 7 && !user.achievements.includes('🔥 7-Day Streak')) {
+            user.achievements.push('🔥 7-Day Streak');
+        }
+    } else {
+        user.streak = 0;
+    }
+    
+    res.json({
+        correct: isCorrect,
+        xp: user.xp,
+        level: user.level,
+        companion: user.companion,
+        streak: user.streak,
+        achievements: user.achievements,
+        feedback: isCorrect ? '✨ Correct! +10 XP' : '🤔 Not quite right. Keep learning!',
+        explanation: isCorrect ? 'Great job!' : 'The correct answer was: ' + correctAnswer
+    });
+});
+
+// Get user progress
+app.get('/api/progress/:userId', (req, res) => {
+    const { userId } = req.params;
+    const user = users.get(userId) || {
+        level: 1,
+        xp: 0,
+        companion: '🥚',
+        streak: 0,
+        achievements: []
+    };
+    
+    const knowledge = pdfKnowledge.get(userId);
+    
+    res.json({
+        user,
+        pdfInfo: knowledge ? {
+            subject: knowledge.subject,
+            topics: knowledge.topics,
+            questionsAvailable: knowledge.questions.length
+        } : null
+    });
+});
+
+// Start server
+const PORT = 5000;
+app.listen(PORT, () => {
+    console.log('✅ AI Learning Mentor running at http://localhost:5000');
+    console.log('📝 Press Ctrl+C to stop the server');
+    console.log('📁 Ready to accept PDF uploads!');
+});
